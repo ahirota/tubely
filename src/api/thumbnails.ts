@@ -36,9 +36,13 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Thumbnail file size must be < 10MB");
   }
 
+  const validThumbnailTypes = ["image/jpeg", "image/png"]
   const type = file.type;
   if (!type) {
     throw new BadRequestError("Missing Content-Type for thumbnail");
+  }
+  if (!validThumbnailTypes.includes(type)) {
+    throw new BadRequestError("Invalid Content-Type for thumbnail");
   }
 
   const ext = mediaTypeToExt(type);
