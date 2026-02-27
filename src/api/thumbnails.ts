@@ -5,6 +5,7 @@ import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import { mediaTypeToExt, getAssetDiskPath, getAssetURL } from "./assets";
+import { randomBytes } from "crypto";
 
 export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   const { videoId } = req.params as { videoId?: string };
@@ -45,8 +46,10 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Invalid Content-Type for thumbnail");
   }
 
+  const randomPathName = randomBytes(32).toString("base64url");
+
   const ext = mediaTypeToExt(type);
-  const filename = `${videoId}${ext}`;
+  const filename = `${randomPathName}${ext}`;
 
   const assetDiskPath = getAssetDiskPath(cfg, filename);
   await Bun.write(assetDiskPath, file);
