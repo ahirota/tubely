@@ -47,7 +47,6 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   }
 
   const randomPathName = randomBytes(32).toString("base64url");
-
   const ext = mediaTypeToExt(type);
   const filename = `${randomPathName}${ext}`;
 
