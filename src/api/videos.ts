@@ -1,3 +1,4 @@
+import { rm } from "fs/promises";
 import { respondWithJSON } from "./json";
 import { type ApiConfig } from "../config";
 import type { BunRequest } from "bun";
@@ -48,25 +49,29 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
 
   const assetDiskPath = getAssetDiskPath(cfg, filename);
   await Bun.write(assetDiskPath, file);
-  const tempFile = Bun.file(assetDiskPath)
-
+  
   const aspectRatio = await getVideoAspectRatio(assetDiskPath);
-
   const prefixedFileName = `${aspectRatio}/${filename}`;
+
+  const processedVideoPath = await processVideoForFastStart(assetDiskPath);
+  const processedFile = Bun.file(processedVideoPath);
 
   const s3file = cfg.s3Client.file(prefixedFileName, {
     bucket: cfg.s3Bucket 
   });
 
-  s3file.write(tempFile, {
+  s3file.write(processedFile, {
     type: type
   });
 
   const assetURL = getS3AssetURL(cfg, prefixedFileName);
   video.videoURL = assetURL;
-
-  await tempFile.delete();
   await updateVideo(cfg.db, video);
+
+  await Promise.all([
+    rm(assetDiskPath, { force: true }),
+    rm(processedVideoPath, { force: true }),
+  ]);  
 
   return respondWithJSON(200, video);
 }
@@ -121,4 +126,33 @@ export async function getVideoAspectRatio(filePath: string) {
   }
 
   return aspectRatio;
+}
+
+export async function processVideoForFastStart(filePath: string) {
+  const outputPath = `${filePath}.processed.mp4`;
+  const proc = Bun.spawn([
+    "ffmpeg", 
+    "-i", 
+    filePath, 
+    "-movflags", 
+    "faststart", 
+    "-map_metadata", 
+    "0", 
+    "-codec", 
+    "copy",
+    "-f",
+    "mp4",
+    outputPath
+  ],{
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const stderrText = await new Response(proc.stderr).text();
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    throw new Error(stderrText);
+  }
+
+  return outputPath;
 }
