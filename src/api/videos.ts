@@ -5,6 +5,7 @@ import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import { getBearerToken, validateJWT } from "../auth";
 import { getVideo, updateVideo } from "../db/videos";
 import { mediaTypeToExt, getAssetDiskPath, getS3AssetURL } from "./assets";
+import { parse } from "path";
 
 export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const { videoId } = req.params as { videoId?: string };
@@ -49,7 +50,11 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await Bun.write(assetDiskPath, file);
   const tempFile = Bun.file(assetDiskPath)
 
-  const s3file = cfg.s3Client.file(filename, {
+  const aspectRatio = await getVideoAspectRatio(assetDiskPath);
+
+  const prefixedFileName = `${aspectRatio}/${filename}`;
+
+  const s3file = cfg.s3Client.file(prefixedFileName, {
     bucket: cfg.s3Bucket 
   });
 
@@ -57,11 +62,63 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     type: type
   });
 
-  const assetURL = getS3AssetURL(cfg, filename);
+  const assetURL = getS3AssetURL(cfg, prefixedFileName);
   video.videoURL = assetURL;
 
   await tempFile.delete();
   await updateVideo(cfg.db, video);
 
   return respondWithJSON(200, video);
+}
+
+export async function getVideoAspectRatio(filePath: string) {
+  const proc = Bun.spawn([
+    "ffprobe", 
+    "-v", 
+    "error", 
+    "-select_streams", 
+    "v:0", 
+    "-show_entries", 
+    "stream=width,height", 
+    "-of", 
+    "json",
+    filePath
+  ],{
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  
+  const stdoutText = await new Response(proc.stdout).text();
+  const stderrText = await new Response(proc.stderr).text();
+  
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    throw new Error(stderrText);
+  }
+
+  const parsed = JSON.parse(stdoutText);
+
+  if (!parsed.streams || parsed.streams.length === 0) {
+    throw new Error("Stream data not found.")
+  }
+
+  const aspectData = parsed.streams[0];
+
+  if (!aspectData.width || !aspectData.height) {
+    throw new Error("Missing stream aspect ratio parameter.")
+  }
+
+  const adjustedWidth = Math.floor(16 * (aspectData.width/9));
+  const adjustedHeight = Math.floor(16 * (aspectData.height/9));
+
+  let aspectRatio;
+  if (aspectData.width === adjustedHeight) {
+    aspectRatio = "landscape";
+  } else if (aspectData.height === adjustedWidth) {
+    aspectRatio = "portrait";
+  } else {
+    aspectRatio = "other";
+  }
+
+  return aspectRatio;
 }
