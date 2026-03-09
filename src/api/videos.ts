@@ -63,7 +63,9 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     type: type
   });
 
-  video.videoURL = prefixedFileName;
+  const cdnURL = `https://${cfg.s3CfDistribution}.cloudfront.net/${prefixedFileName}`;
+
+  video.videoURL = cdnURL;
   await updateVideo(cfg.db, video);
 
   await Promise.all([
@@ -71,8 +73,7 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     rm(processedVideoPath, { force: true }),
   ]);
 
-  const presignedVideo = await dbVideoToSignedVideo(cfg, video)
-  return respondWithJSON(200, presignedVideo);
+  return respondWithJSON(200, video);
 }
 
 export async function getVideoAspectRatio(filePath: string) {
@@ -154,24 +155,4 @@ export async function processVideoForFastStart(filePath: string) {
   }
 
   return outputPath;
-}
-
-export async function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number) {
-  const presignedURL = await cfg.s3Client.presign(key, {
-    expiresIn: expireTime,
-    type: "video/mp4"
-  });
-
-  return presignedURL;
-}
-
-export async function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
-  if (!video.videoURL) {
-    throw new Error("Video URL not found.");
-  }
-
-  const presignedURL = await generatePresignedURL(cfg, video.videoURL, 3600);
-  video.videoURL = presignedURL;
-
-  return video;
 }
